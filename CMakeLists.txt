@@ -1,13 +1,11 @@
-cmake_minimum_required(VERSION 3.10)
+set(include_dirs "include" "tuya-mcu")
+set(srcs "esp-tuya-mcu.c" 
+         "tuya-mcu/tuya-mcu.c"
+         "tuya-mcu/tuya-dp.c"
+)
 
-project(tuya-mcu C)
-
-set(CMAKE_C_STANDARD 99)
-
-include_directories(src)
-
-add_executable(tuya-mcu 
-    src/main.c 
-    src/tuya-mcu/tuya-mcu.c 
-    src/tuya-mcu/tuya-dp.c
+idf_component_register(
+    SRCS "${srcs}"
+    INCLUDE_DIRS "${include_dirs}"
+    REQUIRES driver esp_event
 )

@@ -10,8 +10,8 @@
 #define PID_LEN 16 // Product ID length
 #define VER_LEN 5  // Version length
 
-#define RX_BUF_SIZE 1024
-#define TX_BUF_SIZE 1024
+#define RX_BUF_SIZE 256
+#define TX_BUF_SIZE 256
 
 struct tuya_mcu {
     char                product_id[PID_LEN + 1]; // Product ID
@@ -115,7 +115,6 @@ static uint8_t get_check_sum(uint8_t *pack, size_t pack_len)
     return check_sum;
 }
 
-// Helper to print buffer as hex
 void print_hex(const unsigned char *buf, int len)
 {
     for (int i = 0; i < len; ++i)
@@ -240,6 +239,8 @@ static int tuya_frame_send(tuya_mcu_t mcu, uint8_t version, uint8_t cmd, const u
     memcpy(mcu->tx_buf + 6, data, len);
     mcu->tx_buf[6 + len] = get_check_sum(mcu->tx_buf, 6 + len); // Checksum
 
+    //    printf("TUYA frame tx: ");
+    //    print_hex(mcu->tx_buf, PROTOCOL_HEAD + len);
     // Send the frame
     for (size_t i = 0; i < PROTOCOL_HEAD + len; ++i) {
         if (tuya_mcu_uart_tx(mcu->uart_context, mcu->tx_buf[i]) < 0) {
@@ -268,11 +269,24 @@ static int tuya_frame_send_wifi_mode_ack(tuya_mcu_t mcu)
     return tuya_frame_send(mcu, MCU_TX_VER, WIFI_MODE_CMD, NULL, 0);
 }
 
-int tuya_mcu_update_dp(tuya_mcu_t mcu, tuya_dp_t *dp)
+int tuya_mcu_send_wifi_status(tuya_mcu_t mcu, uint8_t state)
 {
+    // Send wifi state info frame
+    return tuya_frame_send(mcu, MCU_TX_VER, WIFI_STATE_CMD, &state, 1);
+}
+
+static int tuya_mcu_send_state_request(tuya_mcu_t mcu)
+{
+    // Send state query frame
+    return tuya_frame_send(mcu, MCU_TX_VER, STATE_QUERY_CMD, NULL, 0);
+}
+
+int tuya_mcu_send_dp(tuya_mcu_t mcu, tuya_dp_t *dp)
+{
+    uint8_t buf[128];
     // Send data query frame
-    size_t len = tuya_dp_get_len(dp);
-    return tuya_frame_send(mcu, MCU_TX_VER, DATA_QUERT_CMD, (const uint8_t *)dp, len);
+    tuya_dp_serialize(dp, buf, sizeof(buf));
+    return tuya_frame_send(mcu, MCU_TX_VER, DATA_QUERT_CMD, buf, tuya_dp_get_len(dp));
 }
 
 static int tuya_frame_handle(tuya_mcu_t mcu, uint8_t ver, uint8_t cmd, uint8_t *data, size_t len)
@@ -280,52 +294,48 @@ static int tuya_frame_handle(tuya_mcu_t mcu, uint8_t ver, uint8_t cmd, uint8_t *
     // Handle the received frame based on cmd
     switch (cmd) {
     case HEARTBEAT_CMD:
-        printf("Received Heartbeat Frame: ver=0x%02X cmd=0x%02X data=0x%02X\n", ver, cmd, data[0]);
+        //printf("Received Heartbeat Frame: ver=0x%02X cmd=0x%02X data=0x%02X\n", ver, cmd, data[0]);
         if (data[0] == 0x01)
             mcu->heartbeat_received = true; // Heartbeat received
         break;
     case PRODUCT_INFO_CMD:
-        printf("Received Product Info Frame: ver=0x%02X cmd=0x%02X\n", ver, cmd);
+        //printf("Received Product Info Frame: ver=0x%02X cmd=0x%02X\n", ver, cmd);
         parse_product_info(mcu, (const char *)data, len);
         break;
     case WORK_MODE_CMD:
-        printf("Received Work Mode Query Frame: ver=0x%02X cmd=0x%02X\n", ver, cmd);
+        //printf("Received Work Mode Query Frame: ver=0x%02X cmd=0x%02X\n", ver, cmd);
         break;
     case WIFI_STATE_CMD:
-        printf("Received WiFi State Frame: ver=0x%02X cmd=0x%02X\n", ver, cmd);
+        //printf("Received WiFi State Frame: ver=0x%02X cmd=0x%02X\n", ver, cmd);
         break;
     case WIFI_RESET_CMD:
-        printf("Received WiFi Reset Frame: ver=0x%02X cmd=0 x%02X data= x%02X\n", ver, cmd,
-               data[0]);
+        //printf("Received WiFi Reset Frame: ver=0x%02X cmd=0 x%02X data= x%02X\n", ver, cmd,data[0]);
         break;
     case WIFI_MODE_CMD:
-        printf("Received WiFi Mode Frame: ver=0x%02X cmd=0x%02X data= x%02X\n", ver, cmd, data[0]);
+        // printf("Received WiFi Mode Frame: ver=0x%02X cmd=0x%02X data= x%02X\n", ver, cmd, data[0]);
         tuya_frame_send_wifi_mode_ack(mcu);
         if (mcu->config_handler) {
             mcu->config_handler(mcu, mcu->config_handler_arg);
         }
         break;
     case DATA_QUERT_CMD: {
-        printf("Received Data Query Frame: ver=0x%02X cmd=0x%02X\n", ver, cmd);
-        tuya_dp_t dp;
-        parse_tuya_dp(data, len, &dp);
-        tuya_dp_print(&dp);
+        //printf("Received Data Query Frame: ver=0x%02X cmd=0x%02X\n", ver, cmd);
     } break;
-    case STATE_UPLOAD_CMD:
+    case STATE_UPLOAD_CMD: {
         tuya_dp_t dp;
-        printf("Received State Upload Frame: ver=0x%02X cmd=0x%02X\n", ver, cmd);
+        //printf("Received State Upload Frame: ver=0x%02X cmd=0x%02X\n", ver, cmd);
         if (mcu->dp_handler) {
             parse_tuya_dp(data, len, &dp);
             mcu->dp_handler(mcu, &dp, mcu->dp_handler_arg);
         }
-        break;
+    } break;
     case STATE_QUERY_CMD:
-        printf("Received State Query Frame: ver=0x%02X cmd=0x%02X\n", ver, cmd);
+        //printf("Received State Query Frame: ver=0x%02X cmd=0x%02X\n", ver, cmd);
         break;
     // Add more cases for other commands as needed
     default:
-        printf("Unknown command 0x%02X received\n", cmd);
-        break;
+        //printf("Unknown command 0x%02X received\n", cmd);
+        return -1;
     }
     return 0; // Success
 }
@@ -362,6 +372,9 @@ static int tuya_frame_receive(tuya_mcu_t mcu)
                 unsigned char  version = mcu->rx_buf[2];
                 unsigned char  cmd = mcu->rx_buf[3];
                 unsigned char *data = mcu->rx_buf + 6;
+
+                // printf("TUYA frame rx: ");
+                // print_hex(mcu->rx_buf, PROTOCOL_HEAD + len);
                 tuya_frame_handle(mcu, version, cmd, data, len);
             } else {
                 return -1; // Checksum error
@@ -408,9 +421,10 @@ int tuya_mcu_tick(tuya_mcu_t mcu)
             tuya_frame_query_product_info(mcu);
 
         // Check if we have received product info
-        if (strlen(mcu->product_id) > 0 && strlen(mcu->version) > 0)
+        if (strlen(mcu->product_id) > 0 && strlen(mcu->version) > 0) {
+            tuya_mcu_send_state_request(mcu);
             tuya_mcu_state_change(mcu, TUYA_MCU_INITIALIZED);
-
+        }
         break;
 
     case TUYA_MCU_INITIALIZED:

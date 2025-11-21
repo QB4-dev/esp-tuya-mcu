@@ -5,7 +5,7 @@ ESP-IDF component for emulating TUYA MCU modules on ESP8266/ESP32
 
 ## Installation
 
-### Using ESP Component Registry (Recommended)
+### Using ESP Component Registry (Not ready yet)
 
 ```bash
 idf.py add-dependency "QB4-dev/esp-tuya-mcu^1.0.0"
